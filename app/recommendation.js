@@ -3,7 +3,6 @@ const _ = require('lodash')
 
 const TrackService = require('./tracks')
 const SimilarityService = require('./similar')
-// const EnrichmentService = require('./enrichment')
 const FuzzySearch = require('./fuzzy')
 
 /**
@@ -16,8 +15,6 @@ const toArray = (input) => (Array.isArray(input) ? input : [input])
 class RecommendationService {
     /** @type {SimilarityService} */
     #similarityService
-    // /** @type {EnrichmentService} */
-    // #enrichmentService
     /** @type {TrackService} */
     #trackService
     /** @type {FuzzySearch} */
@@ -38,15 +35,15 @@ class RecommendationService {
 
     /**
      * @typedef {Object.<string, any>} Entity
-     * @param {Entity[]} input
-     * @returns
+     * @param {Entity|Entity[]} input user search requests. Each entity must contain track name and optionally artist name
+     * @returns {Promise.<Entity[]>} output holding found track ids
      */
     fuzzySearchTracks = async (input) => {
         input = toArray(input)
 
         const trackInputs = input.filter((v) => v.track)
 
-        const searchResults = await this.#fuzzyService.asyncSearchTrack(trackInputs)
+        const searchResults = await this.#fuzzyService.asyncSearchTracks(trackInputs)
 
         return searchResults
     }
@@ -61,7 +58,7 @@ class RecommendationService {
 
         const artistInput = input.filter((v) => v.artist)
 
-        const searchResults = await this.#fuzzyService.asyncSearchArtist(artistInput)
+        const searchResults = await this.#fuzzyService.asyncSearchArtists(artistInput)
 
         return searchResults
     }
@@ -138,18 +135,6 @@ class RecommendationService {
         return input.map((entity) => ({ ...entity, ...dataMap[entity.id] }))
     }
 
-    // enrichArtist = async (input) => {
-    //     input = toArray(input)
-
-    //     const ids = input.map(R.prop('id'))
-
-    //     const artistData = await this.#enrichmentService.asyncArtistData(ids)
-
-    //     const dataMap = R.indexBy(R.prop('id'))(artistData)
-
-    //     return input.map((entity) => ({ ...entity, ...dataMap[entity.id] }))
-    // }
-
     artistTracks = (options = {}) => async (input) => {
         input = toArray(input)
         options = _.isFunction(options) ? options() : options
@@ -165,22 +150,6 @@ class RecommendationService {
                 }) || []
             )
         })
-    }
-
-    artists = async (input) => {
-        input = toArray(input)
-
-        const trackIds = input.map(({ id }) => id)
-
-        const artistIds = await this.#trackService.asyncGetArtistsByTracks(trackIds)
-
-        const artistMap = R.indexBy(R.prop('uri'))(artistIds)
-
-        return input.map(({ id, ...rest }) => ({
-            id: artistMap[id]['artist_uri'],
-            track_id: id,
-            ...rest
-        }))
     }
 
     /**
@@ -199,13 +168,27 @@ class RecommendationService {
     /**
      * Merges few flows into single flow
      * @typedef {Object.<string, any>} Entity
-     * @param  {...Promise<Entity[]>} flows
-     * @returns {Promise<Entity[]>} multiple flows merged together
+     * @param  {...(Entity[] => Promise<Entity[]>)} flows
+     * @returns high level pipe
      */
-    merge = async (...flows) => {
-        const inputs = (await Promise.allSettled(flows)).filter((v) => v.value).map((v) => v.value)
+    merge = (...pipes) => async (input) => {
+        const convergingF = async (...flows) =>
+            (await Promise.allSettled(flows))
+                .filter((v) => v.value)
+                .map((v) => v.value)
+                .flat()
 
-        return inputs.flat()
+        return R.converge(convergingF, pipes)(input)
+    }
+
+    /**
+     * Creates sequential composition of flows
+     * @typedef {Object.<string, any>} Entity
+     * @param  {...(Entity[] => Promise<Entity[]>)} pipes
+     * @returns high level pipe
+     */
+    compose = (...pipes) => async (input) => {
+        return R.pipeWith(R.andThen, pipes)(input)
     }
 
     /**
@@ -229,7 +212,39 @@ class RecommendationService {
      * @param {Entity|Entity[]} input
      * @returns {Promise<Entity[]>} same as input
      */
-    diversify = (by) => async (input) => _.shuffle(toArray(input))
+    diversify2 = (by) => async (input) => _.shuffle(toArray(input))
+
+    diversify = (by) => async (input) => {
+        const keyF = R.pipe(R.props(toArray(by)), R.join(','))
+
+        const groups = {}
+        const order = []
+
+        for (const entity of input) {
+            const key = keyF(entity)
+            
+            if (!_.has(groups, key)) {
+                order.push(key)
+            }
+
+            _.update(groups, key, arr => arr ? arr.concat([entity]) : [entity])
+        }
+
+        const output = []
+
+        while (!_.isEmpty(order)) {
+            const key = order.shift()
+
+            const entity = groups[key].shift()
+
+            output.push(entity)
+
+            if (!_.isEmpty(groups[key]))
+                order.push(key)
+        }
+
+        return output
+    }
 
     /**
      * Sorts input by specified field

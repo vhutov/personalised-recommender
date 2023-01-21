@@ -22,11 +22,11 @@ class SimilarityService {
      *
      * @returns {Promise<Object.<string, string[]>>} dict of similar entities
      */
-    asyncGetSimilar = async (ids, { indexName, fan_out = 10 }) => {
+    asyncGetSimilar = async (ids, { indexName, fanOut = 10 }) => {
         const key = (id) => `${indexName}:${id}`
 
         const pendingSimilarities = ids.map(async (id) => {
-            const similarIds = await this.#redis.lRange(key(id), 0, fan_out)
+            const similarIds = await this.#redis.lRange(key(id), 0, fanOut)
 
             if (similarIds.length == 0) return null
             return [id, similarIds]

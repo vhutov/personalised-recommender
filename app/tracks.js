@@ -2,7 +2,7 @@ const knex = require('knex')
 const R = require('ramda')
 const _ = require('lodash')
 
-const renameToId = (keyName, list) => list.map(({ [keyName]: id, ...rest }) => ({ id, ...rest }))
+// const renameToId = (keyName, list) => list.map(({ [keyName]: id, ...rest }) => ({ id, ...rest }))
 
 class TrackService {
     /** @type {knex.Knex} */
@@ -34,14 +34,19 @@ class TrackService {
             .from('tracks')
             .whereIn('artist_uri', artistIds)
 
-        const fanOutFun = randomize ? (v) => _.sampleSize(v, fanOut) : (v) => _.slice(v, 0, fanOut)
+        const fanOutFun = 
+            randomize ? 
+                (v) => _.sampleSize(v, fanOut) : 
+                (v) => _.slice(v, 0, fanOut)
+
+        const applyLimitToArtist = R.map(([k, v]) => [k, fanOutFun(v)])
 
         const group = R.groupBy(R.prop('artist_id'))
 
         const limitPerArtist = fanOut
             ? R.pipe(
                   R.toPairs,
-                  R.map(([k, v]) => [k, fanOutFun(v)]),
+                  applyLimitToArtist,
                   R.fromPairs
               )
             : R.identity
@@ -51,36 +56,21 @@ class TrackService {
         return R.pipe(group, limitPerArtist, project)(rows)
     }
 
-     /**
+    /**
      * Gets track data from db
      *
      * @param {string[]} trackIds
      *
      * @returns {Promise<Object.<string, any>[]>} tracks data
      */
-     asyncTrackData = async (trackIds) => {
+    asyncTrackData = async (trackIds) => {
         const rows = await this.#db
             .select()
             .from('tracks')
             .whereIn('uri', trackIds)
 
-        return renameToId('uri', rows)
+        return rows.map(({ uri: id, ...rest }) => ({ id, ...rest }))
     }
-
-    // /**
-    //  * Get list of artists based on their songs.
-    //  *
-    //  * @param {string[]} songIds list of song ids
-    //  * @returns {Promise<string[]>} list of artist ids
-    //  */
-    // asyncGetArtistsByTracks = async (songIds) => {
-    //     const rows = await this.#db
-    //         .select('artist_uri', 'uri')
-    //         .from('tracks')
-    //         .whereIn('uri', songIds)
-
-    //     return R.project(['artist_uri', 'uri'])(rows)
-    // }
 }
 
 module.exports = TrackService

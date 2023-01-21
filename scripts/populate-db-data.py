@@ -24,7 +24,6 @@ def connect():
 def create_tables(engine):
     metadata.create_all(engine)
 
-
 def lines_stream():
     with ZipFile('./scripts/playlist_events.zip', 'r') as file:
         files = file.namelist()

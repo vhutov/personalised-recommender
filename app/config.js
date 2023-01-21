@@ -37,5 +37,6 @@ module.exports = {
     artistTracks: {
         fanOut: 5,
         randomize: true
-    }
+    },
+    limit: 20
 }
